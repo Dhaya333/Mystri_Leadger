@@ -37,6 +37,20 @@ def make_server(db_path, web_dir, port):
                     return self.send(200, reporting.invoices(db, status))
                 if url.path == '/api/export':
                     return self.send(200, reporting.export_csv(db), 'text/csv; charset=utf-8')
+                if url.path == '/api/imports':
+                    # Audit trail: recent import batches, or one batch (with
+                    # its rejected-row detail) when ?id= is given.
+                    raw_id = parse_qs(url.query).get('id', [None])[0]
+                    if raw_id is not None:
+                        try:
+                            batch_id = int(raw_id)
+                        except ValueError:
+                            raise ValueError('id must be an integer')
+                        batch = storage.import_batch(db, batch_id)
+                        if batch is None:
+                            return self.send(404, {'error': 'No such import batch'})
+                        return self.send(200, batch)
+                    return self.send(200, storage.recent_import_batches(db))
                 return self.send(404, {'error': 'Not found'})
             except ValueError as exc:
                 self.send(400, {'error': str(exc)})
@@ -61,7 +75,8 @@ def make_server(db_path, web_dir, port):
             db = storage.connect(db_path)
             try:
                 kind = parse_qs(url.query).get('kind', [''])[0]
-                result = importing.import_csv(db, text, kind)
+                source = parse_qs(url.query).get('source', [None])[0]
+                result = importing.import_csv(db, text, kind, source=source)
                 self.send(200, result)
             except (ValueError, sqlite3.IntegrityError) as exc:
                 self.send(400, {'error': str(exc)})
